@@ -1,4 +1,4 @@
-name: Build and publish ICS
+name: Build and deploy ICS to GitHub Pages
 
 on:
   workflow_dispatch:
@@ -8,13 +8,20 @@ on:
     branches: ["main"]
 
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -30,10 +37,18 @@ jobs:
         run: |
           python -m src.build_calendars
 
-      - name: Commit updated output
-        run: |
-          git config user.name "gorilla-calendar-bot"
-          git config user.email "bot@gorilla-carts.com"
-          git add output/*.ics
-          git commit -m "Update ICS feeds" || echo "No changes"
-          git push
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: output
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
