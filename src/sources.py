@@ -22,7 +22,7 @@ HEADERS = {
 }
 
 def _get(url: str) -> str:
-    r = requests.get(url, headers=HEADERS, timeout=30)
+    r = requests.get(url, headers=HEADERS, timeout=60)
     r.raise_for_status()
     return r.text
 
