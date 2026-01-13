@@ -41,4 +41,51 @@ OUTFILES = {
 }
 
 
-def _empty_placeholder_event(stadiu_
+def _empty_placeholder_event(stadium_name: str) -> list[Event]:
+    # Ensures the .ics file is never empty (helps troubleshooting and prevents 404s).
+    now = datetime.now(timezone.utc)
+    return [
+        Event(
+            title=f"{stadium_name}: calendar generated (no events parsed yet)",
+            start=now,
+            end=None,
+            location=stadium_name,
+            url="",
+        )
+    ]
+
+
+def main() -> int:
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Proof of life: ensures output is never empty and confirms the script ran.
+    (OUTPUT_DIR / "healthcheck.txt").write_text("calendar build ran\n", encoding="utf-8")
+    print("[OK] wrote output/healthcheck.txt")
+
+    buckets: dict[str, list[Event]] = {"wembley": [], "emirates": [], "london-stadium": []}
+
+    for src in SOURCES:
+        try:
+            events = fetch_events(src)
+        except Exception as e:
+            print(f"[WARN] Failed to fetch {src.name}: {e}")
+            events = []
+        buckets[src.stadium_tag].extend(events)
+        print(f"[INFO] {src.name}: {len(events)} events")
+
+    # Always write files, even if 0 events parsed.
+    for tag in buckets:
+        events = buckets[tag]
+        if not events:
+            events = _empty_placeholder_event(CALENDAR_NAMES[tag])
+
+        ics_text = build_ics(CALENDAR_NAMES[tag], events)
+        out = OUTPUT_DIR / OUTFILES[tag]
+        out.write_text(ics_text, encoding="utf-8")
+        print(f"[OK] Wrote {out} ({len(events)} events)")
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
