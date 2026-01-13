@@ -39,6 +39,12 @@ jobs:
           python -m src.build_calendars
           ls -la
           ls -la output
+ 
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: output
+
 
   deploy:
     needs: build
