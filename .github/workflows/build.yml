@@ -1,0 +1,39 @@
+name: Build and publish ICS
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "15 3,15 * * *"
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build calendars
+        run: |
+          python -m src.build_calendars
+
+      - name: Commit updated output
+        run: |
+          git config user.name "gorilla-calendar-bot"
+          git config user.email "bot@gorilla-carts.com"
+          git add output/*.ics
+          git commit -m "Update ICS feeds" || echo "No changes"
+          git push
