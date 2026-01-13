@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -7,24 +8,67 @@ from src.sources import Source, fetch_events
 
 OUTPUT_DIR = Path("output")
 
+# One calendar per stadium tag, but we can feed it multiple sources.
 SOURCES = [
+    # ----------------------------
+    # Wembley Stadium (concerts/other)
+    # ----------------------------
     Source(
         name="Wembley Stadium Events",
         url="https://www.wembleystadium.com/experiences/events",
         location="Wembley Stadium, London",
         stadium_tag="wembley",
+        kind="stadium",  # used for prefixing (C)/(O)
+    ),
+
+    # ----------------------------
+    # Emirates Stadium: Arsenal home fixtures + Emirates events
+    # ----------------------------
+    Source(
+        name="Arsenal Men (Home) – Emirates",
+        url="https://fixtur.es/en/team/arsenal/home",
+        location="Emirates Stadium, London",
+        stadium_tag="emirates",
+        kind="mens",  # (M)
+    ),
+    Source(
+        name="Arsenal Women (Home) – Emirates",
+        url="https://fixtur.es/en/team/arsenal-women/home",
+        location="Emirates Stadium, London",
+        stadium_tag="emirates",
+        kind="womens",  # (F)
     ),
     Source(
         name="Emirates Stadium Events",
-        url="https://www.arsenal.com/emirates-stadium",
+        url="https://www.arsenal.com/emirates-stadium/events",
         location="Emirates Stadium, London",
         stadium_tag="emirates",
+        kind="stadium",  # (C)/(O)
+    ),
+
+    # ----------------------------
+    # London Stadium: West Ham home fixtures + London Stadium events
+    # ----------------------------
+    Source(
+        name="West Ham Men (Home) – London Stadium",
+        url="https://fixtur.es/en/team/west-ham-united/home",
+        location="London Stadium, London",
+        stadium_tag="london-stadium",
+        kind="mens",  # (M)
+    ),
+    Source(
+        name="West Ham Women (Home) – London Stadium",
+        url="https://fixtur.es/en/team/west-ham-united-women/home",
+        location="London Stadium, London",
+        stadium_tag="london-stadium",
+        kind="womens",  # (F)
     ),
     Source(
         name="London Stadium Events",
         url="https://www.london-stadium.com/events/index.html",
         location="London Stadium, London",
         stadium_tag="london-stadium",
+        kind="stadium",  # (C)/(O)
     ),
 ]
 
@@ -40,52 +84,69 @@ OUTFILES = {
     "london-stadium": "london-stadium.ics",
 }
 
+def _prefix_for_source(source: Source, title: str) -> str:
+    """
+    Option 1: single calendar, prefix titles:
+      (M) = Men's fixtures
+      (F) = Women's fixtures
+      (C) = Concerts (best-effort heuristic)
+      (O) = Other (best-effort heuristic)
+    """
+    if getattr(source, "kind", "") == "mens":
+        return f"(M) {title}"
+    if getattr(source, "kind", "") == "womens":
+        return f"(F) {title}"
 
-def _empty_placeholder_event(stadium_name: str) -> list[Event]:
-    # Ensures the .ics file is never empty (helps troubleshooting and prevents 404s).
-    now = datetime.now(timezone.utc)
-    return [
-        Event(
-            title=f"{stadium_name}: calendar generated (no events parsed yet)",
-            start=now,
-            end=None,
-            location=stadium_name,
-            url="",
-        )
-    ]
+    # Stadium events: try to guess concert vs other from the title
+    t = (title or "").lower()
+    concertish = any(k in t for k in ["tour", "live", "concert", "festival", "gig"])
+    sportish = any(k in t for k in ["match", "vs", " v ", "fixture", "cup", "league", "nfl", "boxing", "rugby"])
+    if concertish and not sportish:
+        return f"(C) {title}"
+    return f"(O) {title}"
 
-
-def main() -> int:
+def build() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Proof of life: ensures output is never empty and confirms the script ran.
-    (OUTPUT_DIR / "healthcheck.txt").write_text("calendar build ran\n", encoding="utf-8")
-    print("[OK] wrote output/healthcheck.txt")
+    # Fetch everything from all sources
+    all_events_by_source = fetch_events(SOURCES)
 
-    buckets: dict[str, list[Event]] = {"wembley": [], "emirates": [], "london-stadium": []}
+    # Group into one calendar per stadium
+    events_by_stadium: dict[str, list[Event]] = {k: [] for k in CALENDAR_NAMES.keys()}
 
-    for src in SOURCES:
-        try:
-            events = fetch_events(src)
-        except Exception as e:
-            print(f"[WARN] Failed to fetch {src.name}: {e}")
-            events = []
-        buckets[src.stadium_tag].extend(events)
-        print(f"[INFO] {src.name}: {len(events)} events")
+    for source, events in all_events_by_source.items():
+        tag = source.stadium_tag
+        if tag not in events_by_stadium:
+            continue
 
-    # Always write files, even if 0 events parsed.
-    for tag in buckets:
-        events = buckets[tag]
-        if not events:
-            events = _empty_placeholder_event(CALENDAR_NAMES[tag])
+        for e in events:
+            # Prefix title
+            e.title = _prefix_for_source(source, e.title)
 
-        ics_text = build_ics(CALENDAR_NAMES[tag], events)
-        out = OUTPUT_DIR / OUTFILES[tag]
-        out.write_text(ics_text, encoding="utf-8")
-        print(f"[OK] Wrote {out} ({len(events)} events)")
+            # Ensure location is set (helps in Outlook)
+            if not e.location:
+                e.location = source.location
 
-    return 0
+            events_by_stadium[tag].append(e)
 
+    # Remove placeholders automatically once we have real events
+    for tag, evs in events_by_stadium.items():
+        events_by_stadium[tag] = [
+            e for e in evs
+            if "calendar generated (no events parsed yet)" not in (e.title or "").lower()
+        ]
+
+    # Write ICS files
+    for tag, cal_name in CALENDAR_NAMES.items():
+        outfile = OUTPUT_DIR / OUTFILES[tag]
+        events = sorted(events_by_stadium[tag], key=lambda e: e.start)
+
+        ics_text = build_ics(
+            calendar_name=cal_name,
+            events=events,
+            generated_at=datetime.now(timezone.utc),
+        )
+        outfile.write_text(ics_text, encoding="utf-8")
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    build()
