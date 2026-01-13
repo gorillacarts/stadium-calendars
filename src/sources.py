@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 import json
 import re
+import time
+import sys
 from datetime import timedelta
 
 import requests
@@ -19,7 +21,7 @@ class Source:
     url: str
     location: str
     stadium_tag: str
-    # Optional, used by build_calendars.py for (M)/(F)/(C)/(O) prefixes.
+    # Optional: used by build_calendars.py for (M)/(F)/(C)/(O) prefixes
     kind: str = ""
 
 
@@ -30,9 +32,21 @@ HEADERS = {
 
 
 def _get(url: str) -> str:
-    r = requests.get(url, headers=HEADERS, timeout=60)
-    r.raise_for_status()
-    return r.text
+    """
+    Fetch a URL but NEVER crash the whole build if a site is slow / blocks us.
+    Returns "" on failure so downstream parsers return [].
+    """
+    for attempt in range(2):  # simple retry once
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=90)
+            r.raise_for_status()
+            return r.text
+        except Exception as e:
+            print(f"[WARN] Failed to fetch {url} (attempt {attempt+1}/2): {e}", file=sys.stderr)
+            if attempt == 0:
+                time.sleep(2)
+                continue
+            return ""
 
 
 # -----------------------------
@@ -52,6 +66,7 @@ def _events_from_jsonld(html: str, default_location: str) -> list[Event]:
         except Exception:
             continue
 
+        # JSON-LD can be dict/list and can include @graph
         candidates: list[Any] = []
         if isinstance(data, list):
             candidates = data
@@ -79,6 +94,7 @@ def _events_from_jsonld(html: str, default_location: str) -> list[Event]:
             end = obj.get("endDate")
             url = str(obj.get("url") or "").strip()
 
+            # location may be nested
             loc = default_location
             loc_obj = obj.get("location")
             if isinstance(loc_obj, dict):
@@ -118,6 +134,7 @@ _FIXTURES_DT_RE = re.compile(
     r"^\d{1,2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{1,2}:\d{2}\s+[+-]\d{2}:\d{2}$"
 )
 
+
 def _events_from_fixtures(html: str, default_location: str, page_url: str) -> list[Event]:
     soup = BeautifulSoup(html, "html.parser")
 
@@ -152,6 +169,10 @@ def _events_from_fixtures(html: str, default_location: str, page_url: str) -> li
                     start_dt = None
 
                 if start_dt:
+                    # Add a default duration so Outlook shows a block
+                    end_dt = start_dt + timedelta(hours=2, minutes=30)
+
+                    # Competition tag best-effort (helps later filtering)
                     comp = ""
                     window = " ".join(text_lines[max(0, i-2): min(len(text_lines), i+3)]).lower()
                     if "champions league" in window:
@@ -174,7 +195,7 @@ def _events_from_fixtures(html: str, default_location: str, page_url: str) -> li
                         Event(
                             title=title,
                             start=start_dt,
-                            end=start_dt + timedelta(hours=2, minutes=30),
+                            end=end_dt,
                             location=default_location,
                             url=page_url,
                         )
@@ -189,6 +210,8 @@ def _events_from_fixtures(html: str, default_location: str, page_url: str) -> li
 
 def _fetch_one(source: Source) -> list[Event]:
     html = _get(source.url)
+    if not html:
+        return []
 
     if "fixtur.es" in source.url:
         return _events_from_fixtures(html, source.location, source.url)
