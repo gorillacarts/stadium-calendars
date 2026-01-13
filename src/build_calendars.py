@@ -40,15 +40,5 @@ OUTFILES = {
     "london-stadium": "london-stadium.ics",
 }
 
-def _empty_placeholder_event(stadium_name: str) -> list[Event]:
-    # Ensures the .ics file is never empty (helps troubleshooting and prevents 404s).
-    now = datetime.now(timezone.utc)
-    return [
-        Event(
-            title=f"{stadium_name}: calendar generated (no events parsed yet)",
-            start=now,
-            end=None,
-            location=stadium_name,
-            url="",
-        )
-    ]
+
+def _empty_placeholder_event(stadiu_
