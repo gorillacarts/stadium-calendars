@@ -33,18 +33,19 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-            - name: Build calendars
+      - name: Build calendars
         run: |
           mkdir -p output
           python -m src.build_calendars
+          echo "=== repo root ==="
           ls -la
+          echo "=== output ==="
           ls -la output
- 
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: output
-
 
   deploy:
     needs: build
