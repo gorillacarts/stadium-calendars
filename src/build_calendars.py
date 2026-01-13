@@ -16,7 +16,7 @@ SOURCES = [
     ),
     Source(
         name="Emirates Stadium Events",
-        url="https://www.arsenal.com/emirates-stadium/events",
+        url="https://www.arsenal.com/emirates-stadium",
         location="Emirates Stadium, London",
         stadium_tag="emirates",
     ),
